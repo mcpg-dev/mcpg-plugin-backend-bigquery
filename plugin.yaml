@@ -1,0 +1,49 @@
+schema: mcpg.dev/plugin/v1
+id: dev.mcpg.backend.bigquery
+name: BigQuery Binding
+license: Apache-2.0
+description: |
+  Runs an operator-fixed Standard-SQL statement against Google BigQuery over
+  the REST jobs API (`jobs.query`) and returns the rows as JSON, typed by the
+  result schema. Auth is a GCP service-account key (`auth.mode: service_account`
+  with `credentials_json`); the key resolves through the gateway secret-resolver
+  (`${env.X}` / `vault://...`) at config load. A read-only guard (rejects
+  non-SELECT/WITH statements), a `query.max_rows` cap and a
+  `query.maximum_bytes_billed` cost cap bound the statement (over-budget queries
+  fail server-side without incurring a charge). The statement text is
+  operator-fixed — caller arguments are NOT templated into the SQL; CEL `params`
+  bind caller values as positional BigQuery query parameters (injection-safe).
+
+  Setting `query.dry_run: true` turns the binding into a cost estimator: the
+  statement is sent with `dryRun=true`, so BigQuery validates and plans it but
+  does NOT execute it (no data scanned, no charge). The binding then returns an
+  estimate envelope — `estimate.totalBytesProcessed`, `estimate.cacheHit` and
+  the planned result schema — instead of rows, letting an agent size a query
+  before paying to run it. With an operator-supplied `query.price_per_tib_usd`
+  the envelope also carries a derived `estimate.estimatedCostUsd`.
+
+  A `resource_templates[]` binding (`surface: resource` with a `uri_template`
+  like `bigquery://orders/{id}`) may set `read_query` — a per-`{id}` single-row
+  read. On a `resources/read` of a concrete URI the gateway extracts each
+  template `{var}` into `arguments.<var>`; the binding's CEL `params` bind those
+  into `read_query`'s `?` placeholders as positional BigQuery query parameters,
+  so the extracted value binds server-side and is never interpolated into SQL
+  (injection-safe). `read_query` is operator-fixed, read-only-guarded, and may
+  replace `statement` for the binding.
+
+  A second `watch_strategy` entity (kind `bigquery_poll`) lets a resource
+  subscribe to BigQuery changes by POLLING. Each watcher carries its own
+  connection (`project_id` / `dataset` / `location` / `auth`) plus a read-only
+  scalar high-water `tracking_query` (e.g.
+  `SELECT MAX(updated_at) FROM dataset.table`). The plugin runs that query every
+  `interval_ms` (default 60000, floored at 250 ms) with a per-tick `timeout_ms`
+  budget (default 10000), and emits `notifications/resources/updated` whenever
+  the scalar advances past the previously-seen value (the first tick only
+  establishes the baseline, so a watcher never fires spuriously at startup). The
+  `tracking_query` is held to the same read-only keyword guard as the backend
+  statement; an empty or non-read-only query, a bare `cred://` credential, or an
+  empty credential is rejected at watch start.
+class: backend
+runtime: native-cdylib-v1
+protocol_version: "1.0"
+required_capabilities: [network_outbound]

@@ -1,0 +1,62 @@
+[package]
+name = "mcpg-plugin-backend-bigquery"
+version = "0.1.0-alpha.15"
+license = "Apache-2.0"
+edition = "2024"
+description = """
+Google BigQuery cloud-warehouse backend binding plugin for mcpg. Runs an
+operator-fixed Standard-SQL statement against BigQuery over the REST jobs API
+(`jobs.query`) and returns the rows as JSON, typed by the result schema. Auth
+is a GCP service-account key (JSON), resolved through the gateway
+secret-resolver (`${env.X}` / `vault://`). A read-only guard, a `max_rows` cap
+and a `maximum_bytes_billed` cost cap bound the statement. Complements the
+`snowflake` / `sql` / `mssql` / `oracle` warehouse backends, whose drivers
+can't speak the BigQuery REST protocol.
+
+Pure-Rust + rustls-clean (gcloud-bigquery default features → reqwest/rustls +
+aws-lc-rs; no openssl / native-tls / system lib — only `openssl-probe` /
+`aws-lc-*`, which are allowed). Pulls a transitive reqwest/tonic/Arrow graph,
+so the first build is slow.
+"""
+
+[lib]
+# cdylib: the .so the gateway's native_loader dlopens. rlib: in-tree unit
+# tests + the eager new() constructor.
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+cdylib-export = []
+# Declared empty so the SDK macro's static accessor doesn't trip
+# unexpected_cfgs; bigquery is consumed as a cdylib.
+static-firstparty = []
+# Gates the live/emulator BigQuery integration suite so `cargo test --lib`
+# stays offline. Run:
+# `cargo test -p mcpg-plugin-backend-bigquery --features integration-tests`.
+integration-tests = []
+
+[dependencies]
+mcpg-plugin-protocol = { git = "https://github.com/mcpg-dev/mcpg-plugin-protocol", tag = "v0.1.0-beta.13", version = "=0.1.0-beta.13" }
+mcpg-plugin-sdk      = { git = "https://github.com/mcpg-dev/mcpg-plugin-sdk", tag = "v0.1.0-beta.13", version = "=0.1.0-beta.13", features = ["static-firstparty"] }
+mcpg-plugin-host     = { git = "https://github.com/mcpg-dev/mcpg-plugin-host", tag = "v0.1.0-beta.13", version = "=0.1.0-beta.13" }
+async-trait    = "0.1"
+base64         = "0.22"
+# CEL bind-parameter expressions — `params[i]` is compiled at register and
+# evaluated per call against the tool arguments, then bound as a BigQuery query
+# parameter (never interpolated). Mirrors oracle / duckdb.
+cel            = "0.13"
+chrono         = { version = "0.4", default-features = false, features = ["clock"] }
+metrics        = "0.24"
+# BigQuery REST driver (yoshidan/google-cloud-rust). Default features are
+# `rustls-tls + auth + jwt-aws-lc-rs` → reqwest/rustls + aws-lc-rs; NO openssl /
+# native-tls / system lib. Provides service-account auth via CredentialsFile and
+# an emulator endpoint override (`with_endpoint` / `new_with_emulator`).
+gcloud-bigquery = "1.7.0"
+serde          = { version = "1", features = ["derive"] }
+serde_json     = "1"
+tokio          = { version = "1", features = ["sync", "rt", "rt-multi-thread", "macros", "time"] }
+tracing        = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time"] }
+async-trait = "0.1"
