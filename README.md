@@ -46,7 +46,7 @@ One `auth.mode` (default `service_account`):
 
 | Mode | Secret field | Notes |
 |---|---|---|
-| `service_account` | `auth.credentials_json` | The GCP service-account key, as the full JSON document. |
+| `service_account` | `auth.credentials_json` | The GCP service-account key, as the full JSON document. Another credentials file type (`authorized_user`, `external_account`) is refused when the client is built. |
 
 The key resolves through the gateway secret-resolver (`${env.X}` / `vault://…`)
 at config load — never plaintext in committed config. A **bare** per-caller

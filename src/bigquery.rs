@@ -68,6 +68,14 @@ pub async fn build_client(
             )
             .await
             .map_err(|e| redact(format!("BigQuery credentials parse failed: {e}")))?;
+        // The client also takes authorized_user and external_account files;
+        // an external_account makes the gateway read its credential_source.
+        if creds.tp != "service_account" {
+            return Err(redact(format!(
+                "BigQuery auth.credentials_json must be a service_account key, not {}",
+                creds.tp
+            )));
+        }
         let (config, _project) = ClientConfig::new_with_credentials(creds)
             .await
             .map_err(|e| redact(format!("BigQuery client auth failed: {e}")))?;
@@ -355,6 +363,32 @@ mod tests {
     use super::*;
     use gcloud_bigquery::http::tabledata::list::Cell;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn only_a_service_account_key_builds_a_client() {
+        let user = json!({
+            "type": "authorized_user",
+            "client_id": "c",
+            "client_secret": "s",
+            "refresh_token": "r",
+        });
+        let federated = json!({
+            "type": "external_account",
+            "audience": "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/q",
+            "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+            "token_url": "https://sts.googleapis.com/v1/token",
+            "credential_source": { "file": "/var/run/secrets/token" },
+        });
+        for (file, tp) in [(user, "authorized_user"), (federated, "external_account")] {
+            let Err(refused) = build_client(&file.to_string(), None).await else {
+                panic!("a {tp} file builds a client");
+            };
+            assert_eq!(
+                refused,
+                format!("BigQuery auth.credentials_json must be a service_account key, not {tp}")
+            );
+        }
+    }
 
     fn field(name: &str, ty: TableFieldType) -> TableFieldSchema {
         let mut f = TableFieldSchema {
